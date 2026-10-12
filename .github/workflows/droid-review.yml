@@ -1,0 +1,54 @@
+# factory-automation: ecaf0503-3bb3-4c07-bd0f-221da1038dc6
+name: Droid Code Review
+
+# automatic_review / automatic_security_review は PR イベント専用（action.yml）。
+# workflow_dispatch は対象 PR を解決できないため定義しない。
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - ready_for_review
+      - reopened
+
+# deep レビューは実行ごとに課金されるため、同一 PR の古い run は打ち切る
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# レビュー投稿に必要な最小権限。auto_fix / ci_steward は無効なので contents: write は不要。
+# id-token: write は Factory Droid GitHub App の OIDC 交換に必要。
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # draft は WIP のためスキップ（ready_for_review で起動する）
+    if: github.event.pull_request.draft == false
+    steps:
+      # 未登録だと action が空キーのまま進むため、先に分かりやすく失敗させる
+      - name: Check FACTORY_API_KEY
+        env:
+          FACTORY_API_KEY: ${{ secrets.FACTORY_API_KEY }}
+        run: |
+          if [ -z "$FACTORY_API_KEY" ]; then
+            echo "::error::FACTORY_API_KEY secret is not configured on this repository" >&2
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Run Factory droid-action
+        uses: Factory-AI/droid-action@ec767fcf5fac43b64e746cd42bb398b3b0b529ed # v10
+        with:
+          factory_api_key: ${{ secrets.FACTORY_API_KEY }}
+          automatic_review: true
+          automatic_security_review: true
+          review_depth: deep
